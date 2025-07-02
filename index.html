@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -156,88 +157,37 @@
       const saveTasks = () =>
         localStorage.setItem("tasks", JSON.stringify(tasks));
 
-      // Modified renderTasks to show open tasks (sorted by priority) first, then completed tasks (sorted by most recently completed at top)
       const renderTasks = () => {
         const container = document.getElementById("taskList");
         container.innerHTML = "";
+        tasks
+          .sort((a, b) => b.priority - a.priority)
+          .forEach((t, i) => {
+            const taskDiv = document.createElement("div");
+            taskDiv.className = "task";
+            const now = new Date();
+            const deadline = new Date(t.deadline);
+            if (deadline - now <= 86400000 && deadline > now)
+              taskDiv.classList.add("urgent");
+            if (deadline < now) taskDiv.classList.add("overdue");
+            if (t.completed) taskDiv.classList.add("completed");
 
-        // Partition tasks
-        const openTasks = [];
-        const completedTasks = [];
-
-        tasks.forEach((task, idx) => {
-          if (task.completed) {
-            completedTasks.push({ task, idx });
-          } else {
-            openTasks.push({ task, idx });
-          }
-        });
-
-        // Sort open tasks by priority descending
-        openTasks.sort((a, b) => b.task.priority - a.task.priority);
-
-        // Sort completed tasks by completedAt descending (most recently completed at the top)
-        completedTasks.sort((a, b) => {
-          // If completedAt is undefined, treat as old
-          const aTime = a.task.completedAt ? new Date(a.task.completedAt).getTime() : 0;
-          const bTime = b.task.completedAt ? new Date(b.task.completedAt).getTime() : 0;
-          return bTime - aTime;
-        });
-
-        // Render open tasks
-        openTasks.forEach(({ task: t, idx: i }) => {
-          const taskDiv = document.createElement("div");
-          taskDiv.className = "task";
-          const now = new Date();
-          const deadline = new Date(t.deadline);
-          if (deadline - now <= 86400000 && deadline > now)
-            taskDiv.classList.add("urgent");
-          if (deadline < now) taskDiv.classList.add("overdue");
-          if (t.completed) taskDiv.classList.add("completed");
-
-          taskDiv.innerHTML = `
-            <strong>${t.merchant}</strong> – ${t.description}<br/>
-            Deadline: ${deadline.toLocaleString()}<br/>
-            Priority: ${t.priority.toFixed(2)}<br/>
-            MRR: $${t.mrr}, Urgency: ${t.urgency}, Time: ${t.time} mins,<br/>
-            Escalation: ${t.escalation}, Dependencies: ${t.dependencies}
-            <div class="task-actions">
-              <button class="edit-btn" onclick="editTask(${i})">Edit</button>
-              <button class="delete-btn" onclick="deleteTask(${i})">Delete</button>
-              <button class="complete-btn" onclick="toggleComplete(${i})">
-                ${t.completed ? "Undo" : "Complete"}
-              </button>
-            </div>
-          `;
-          container.appendChild(taskDiv);
-        });
-
-        // Render completed tasks
-        completedTasks.forEach(({ task: t, idx: i }) => {
-          const taskDiv = document.createElement("div");
-          taskDiv.className = "task completed";
-          const now = new Date();
-          const deadline = new Date(t.deadline);
-          if (deadline - now <= 86400000 && deadline > now)
-            taskDiv.classList.add("urgent");
-          if (deadline < now) taskDiv.classList.add("overdue");
-
-          taskDiv.innerHTML = `
-            <strong>${t.merchant}</strong> – ${t.description}<br/>
-            Deadline: ${deadline.toLocaleString()}<br/>
-            Priority: ${t.priority.toFixed(2)}<br/>
-            MRR: $${t.mrr}, Urgency: ${t.urgency}, Time: ${t.time} mins,<br/>
-            Escalation: ${t.escalation}, Dependencies: ${t.dependencies}
-            <div class="task-actions">
-              <button class="edit-btn" onclick="editTask(${i})">Edit</button>
-              <button class="delete-btn" onclick="deleteTask(${i})">Delete</button>
-              <button class="complete-btn" onclick="toggleComplete(${i})">
-                ${t.completed ? "Undo" : "Complete"}
-              </button>
-            </div>
-          `;
-          container.appendChild(taskDiv);
-        });
+            taskDiv.innerHTML = `
+          <strong>${t.merchant}</strong> – ${t.description}<br/>
+          Deadline: ${deadline.toLocaleString()}<br/>
+          Priority: ${t.priority.toFixed(2)}<br/>
+          MRR: $${t.mrr}, Urgency: ${t.urgency}, Time: ${t.time} mins,<br/>
+          Escalation: ${t.escalation}, Dependencies: ${t.dependencies}
+          <div class="task-actions">
+            <button class="edit-btn" onclick="editTask(${i})">Edit</button>
+            <button class="delete-btn" onclick="deleteTask(${i})">Delete</button>
+            <button class="complete-btn" onclick="toggleComplete(${i})">
+              ${t.completed ? "Undo" : "Complete"}
+            </button>
+          </div>
+        `;
+            container.appendChild(taskDiv);
+          });
       };
 
       const addTask = () => {
@@ -253,13 +203,9 @@
           ),
           deadline: document.getElementById("deadline").value,
           completed: false,
-          completedAt: null,
         };
         task.priority = calculatePriority(task);
         if (editIndex !== null) {
-          // Preserve completed/completedAt for edited tasks
-          task.completed = tasks[editIndex].completed;
-          task.completedAt = tasks[editIndex].completedAt || null;
           tasks[editIndex] = task;
           editIndex = null;
         } else {
@@ -293,15 +239,8 @@
         }
       };
 
-      // Modified toggleComplete to set completedAt timestamp
       const toggleComplete = (i) => {
-        if (!tasks[i].completed) {
-          tasks[i].completed = true;
-          tasks[i].completedAt = new Date().toISOString();
-        } else {
-          tasks[i].completed = false;
-          tasks[i].completedAt = null;
-        }
+        tasks[i].completed = !tasks[i].completed;
         saveTasks();
         renderTasks();
       };
@@ -329,8 +268,6 @@
             escalation: 8,
             dependencies: 2,
             deadline: new Date().toISOString(),
-            completed: false,
-            completedAt: null,
           },
         ];
         const ws = XLSX.utils.json_to_sheet(sample);
@@ -352,7 +289,6 @@
             json.forEach((task) => {
               task.priority = calculatePriority(task);
               task.completed = false;
-              task.completedAt = null;
               tasks.push(task);
             });
             saveTasks();
