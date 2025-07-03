@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Task Prioritization App</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 2rem auto;
+        padding: 1rem;
+      }
+      label {
+        display: block;
+        font-weight: bold;
+        margin-top: 10px;
+      }
+      input,
+      textarea,
+      button {
+        width: 100%;
+        padding: 10px;
+        margin-top: 5px;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+      }
+      button {
+        cursor: pointer;
+      }
+      .task {
+        padding: 10px;
+        margin: 10px 0;
+        border-left: 6px solid #007bff;
+        background: #f9f9f9;
+        border-radius: 5px;
+      }
+      .urgent {
+        background: #ffe5e5;
+        border-left-color: red;
+      }
+      .overdue {
+        background: #ffcccc;
+        border-left-color: darkred;
+      }
+      .completed {
+        text-decoration: line-through;
+        color: #888;
+        background-color: #e6e6e6 !important;
+      }
+      .task-actions button {
+        width: auto;
+        margin-right: 10px;
+        padding: 5px 10px;
+        color: white;
+        border: none;
+        border-radius: 5px;
+      }
+      .edit-btn {
+        background-color: orange;
+      }
+      .delete-btn {
+        background-color: red;
+      }
+      .complete-btn {
+        background-color: green;
+      }
+      .hamburger-button {
+        background-color: #333;
+        color: white;
+        padding: 10px 20px;
+        border-radius: 6px;
+        margin: 20px 0;
+      }
+      #menu {
+        display: none;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        padding: 10px;
+        background: #f0f0f0;
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Task Prioritization App</h2>
+
+    <label>Merchant Name</label>
+    <input type="text" id="merchant" />
+
+    <label>Task Description</label>
+    <textarea id="description" maxlength="120"></textarea>
+
+    <label>MRR (in dollars)</label>
+    <input type="number" id="mrr" />
+
+    <label>Urgency (1-10)</label>
+    <input type="number" id="urgency" />
+
+    <label>Time Needed (in minutes)</label>
+    <input type="number" id="time" />
+
+    <label>Escalation Chance (1-10)</label>
+    <input type="number" id="escalation" />
+
+    <label>Dependencies (0-5)</label>
+    <input type="number" id="dependencies" />
+
+    <label>Deadline</label>
+    <input type="datetime-local" id="deadline" />
+
+    <button onclick="addTask()">Add Task</button>
+
+    <button onclick="toggleMenu()" class="hamburger-button">☰ Menu</button>
+    <div id="menu">
+      <button onclick="exportExcel()">Export to Excel</button>
+      <button onclick="window.print()">Export to PDF</button>
+      <button onclick="downloadSample()">Download Sample CSV</button>
+      <input type="file" id="csvUpload" accept=".csv,.xlsx" />
+    </div>
+
+    <div id="taskList"></div>
+
+    <script>
+      let tasks = JSON.parse(localStorage.getItem("tasks") || "[]");
+      let editIndex = null;
+
+      const weights = {
+        mrr: 25,
+        urgency: 25,
+        time: 10,
+        escalation: 30,
+        dependencies: 10,
+      };
+
+      const normalize = (val, max) => Math.min(val / max, 1);
+      const calculatePriority = (t) => {
+        const norm = {
+          mrr: normalize(t.mrr, 10000),
+          urgency: normalize(t.urgency, 10),
+          time: 1 - normalize(t.time, 120),
+          escalation: normalize(t.escalation, 10),
+          dependencies: normalize(t.dependencies, 5),
+        };
+        return (
+          ((norm.mrr * weights.mrr +
+            norm.urgency * weights.urgency +
+            norm.time * weights.time +
+            norm.escalation * weights.escalation +
+            norm.dependencies * weights.dependencies) /
+            100) *
+          100
+        );
+      };
+
+      const saveTasks = () =>
+        localStorage.setItem("tasks", JSON.stringify(tasks));
+
+      // Modified renderTasks to show open tasks (sorted by priority) first, then completed tasks (sorted by most recently completed at top)
+      const renderTasks = () => {
+        const container = document.getElementById("taskList");
+        container.innerHTML = "";
+
+        // Partition tasks
+        const openTasks = [];
+        const completedTasks = [];
+
+        tasks.forEach((task, idx) => {
+          if (task.completed) {
+            completedTasks.push({ task, idx });
+          } else {
+            openTasks.push({ task, idx });
+          }
+        });
+
+        // Sort open tasks by priority descending
+        openTasks.sort((a, b) => b.task.priority - a.task.priority);
+
+        // Sort completed tasks by completedAt descending (most recently completed at the top)
+        completedTasks.sort((a, b) => {
+          // If completedAt is undefined, treat as old
+          const aTime = a.task.completedAt
+            ? new Date(a.task.completedAt).getTime()
+            : 0;
+          const bTime = b.task.completedAt
+            ? new Date(b.task.completedAt).getTime()
+            : 0;
+          return bTime - aTime;
+        });
+
+        // Render open tasks
+        openTasks.forEach(({ task: t, idx: i }) => {
+          const taskDiv = document.createElement("div");
+          taskDiv.className = "task";
+          const now = new Date();
+          const deadline = new Date(t.deadline);
+          if (deadline - now <= 86400000 && deadline > now)
+            taskDiv.classList.add("urgent");
+          if (deadline < now) taskDiv.classList.add("overdue");
+          if (t.completed) taskDiv.classList.add("completed");
+
+          taskDiv.innerHTML = `
+            <strong>${t.merchant}</strong> – ${t.description}<br/>
+            Deadline: ${deadline.toLocaleString()}<br/>
+            Priority: ${t.priority.toFixed(2)}<br/>
+            MRR: $${t.mrr}, Urgency: ${t.urgency}, Time: ${t.time} mins,<br/>
+            Escalation: ${t.escalation}, Dependencies: ${t.dependencies}
+            <div class="task-actions">
+              <button class="edit-btn" onclick="editTask(${i})">Edit</button>
+              <button class="delete-btn" onclick="deleteTask(${i})">Delete</button>
+              <button class="complete-btn" onclick="toggleComplete(${i})">
+                ${t.completed ? "Undo" : "Complete"}
+              </button>
+            </div>
+          `;
+          container.appendChild(taskDiv);
+        });
+
+        // Render completed tasks
+        completedTasks.forEach(({ task: t, idx: i }) => {
+          const taskDiv = document.createElement("div");
+          taskDiv.className = "task completed";
+          const now = new Date();
+          const deadline = new Date(t.deadline);
+          if (deadline - now <= 86400000 && deadline > now)
+            taskDiv.classList.add("urgent");
+          if (deadline < now) taskDiv.classList.add("overdue");
+
+          taskDiv.innerHTML = `
+            <strong>${t.merchant}</strong> – ${t.description}<br/>
+            Deadline: ${deadline.toLocaleString()}<br/>
+            Priority: ${t.priority.toFixed(2)}<br/>
+            MRR: $${t.mrr}, Urgency: ${t.urgency}, Time: ${t.time} mins,<br/>
+            Escalation: ${t.escalation}, Dependencies: ${t.dependencies}
+            <div class="task-actions">
+              <button class="edit-btn" onclick="editTask(${i})">Edit</button>
+              <button class="delete-btn" onclick="deleteTask(${i})">Delete</button>
+              <button class="complete-btn" onclick="toggleComplete(${i})">
+                ${t.completed ? "Undo" : "Complete"}
+              </button>
+            </div>
+          `;
+          container.appendChild(taskDiv);
+        });
+      };
+
+      const addTask = () => {
+        const task = {
+          merchant: document.getElementById("merchant").value.trim(),
+          description: document.getElementById("description").value.trim(),
+          mrr: parseFloat(document.getElementById("mrr").value),
+          urgency: parseFloat(document.getElementById("urgency").value),
+          time: parseFloat(document.getElementById("time").value),
+          escalation: parseFloat(document.getElementById("escalation").value),
+          dependencies: parseFloat(
+            document.getElementById("dependencies").value
+          ),
+          deadline: document.getElementById("deadline").value,
+          completed: false,
+          completedAt: null,
+        };
+        task.priority = calculatePriority(task);
+        if (editIndex !== null) {
+          // Preserve completed/completedAt for edited tasks
+          task.completed = tasks[editIndex].completed;
+          task.completedAt = tasks[editIndex].completedAt || null;
+          tasks[editIndex] = task;
+          editIndex = null;
+        } else {
+          tasks.push(task);
+        }
+        saveTasks();
+        renderTasks();
+        document
+          .querySelectorAll("input, textarea")
+          .forEach((e) => (e.value = ""));
+      };
+
+      const editTask = (i) => {
+        const t = tasks[i];
+        document.getElementById("merchant").value = t.merchant;
+        document.getElementById("description").value = t.description;
+        document.getElementById("mrr").value = t.mrr;
+        document.getElementById("urgency").value = t.urgency;
+        document.getElementById("time").value = t.time;
+        document.getElementById("escalation").value = t.escalation;
+        document.getElementById("dependencies").value = t.dependencies;
+        document.getElementById("deadline").value = t.deadline;
+        editIndex = i;
+      };
+
+      const deleteTask = (i) => {
+        if (confirm("Delete this task?")) {
+          tasks.splice(i, 1);
+          saveTasks();
+          renderTasks();
+        }
+      };
+
+      // Modified toggleComplete to set completedAt timestamp
+      const toggleComplete = (i) => {
+        if (!tasks[i].completed) {
+          tasks[i].completed = true;
+          tasks[i].completedAt = new Date().toISOString();
+        } else {
+          tasks[i].completed = false;
+          tasks[i].completedAt = null;
+        }
+        saveTasks();
+        renderTasks();
+      };
+
+      const toggleMenu = () => {
+        const menu = document.getElementById("menu");
+        menu.style.display = menu.style.display === "none" ? "block" : "none";
+      };
+
+      const exportExcel = () => {
+        const ws = XLSX.utils.json_to_sheet(tasks);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Tasks");
+        XLSX.writeFile(wb, "tasks.xlsx");
+      };
+
+      const downloadSample = () => {
+        const sample = [
+          {
+            merchant: "Demo Corp",
+            description: "Urgent ticket follow-up",
+            mrr: 4000,
+            urgency: 9,
+            time: 30,
+            escalation: 8,
+            dependencies: 2,
+            deadline: new Date().toISOString(),
+            completed: false,
+            completedAt: null,
+          },
+        ];
+        const ws = XLSX.utils.json_to_sheet(sample);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Sample");
+        XLSX.writeFile(wb, "sample_task_upload.xlsx");
+      };
+
+      document
+        .getElementById("csvUpload")
+        .addEventListener("change", function (e) {
+          const file = e.target.files[0];
+          const reader = new FileReader();
+          reader.onload = function (evt) {
+            const data = evt.target.result;
+            const workbook = XLSX.read(data, { type: "binary" });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(sheet);
+            json.forEach((task) => {
+              task.priority = calculatePriority(task);
+              task.completed = false;
+              task.completedAt = null;
+              tasks.push(task);
+            });
+            saveTasks();
+            renderTasks();
+          };
+          reader.readAsBinaryString(file);
+        });
+
+      renderTasks();
+    </script>
+  </body>
+</html>
